@@ -1,0 +1,50 @@
+# Core
+python-dotenv
+pydantic
+typing_extensions
+
+# API
+fastapi
+uvicorn
+
+# LangChain & Graph
+langchain
+langchain-core
+langchain-community
+langchain-openai
+langgraph
+langchain_tavily
+langchain-groq
+tavily-python
+langchain-qdrant
+# Vector DB
+faiss-cpu
+
+# PDF & Images
+pymupdf   # fitz
+pillow
+
+# OpenAI client
+openai
+
+# Utilities
+requests
+
+
+python-multipart
+
+
+qdrant-client
+
+llama_parse
+
+
+google-api-python-client 
+google-auth 
+google-auth-httplib2 
+google-auth-oauthlib
+
+
+fastmcp
+
+streamlit

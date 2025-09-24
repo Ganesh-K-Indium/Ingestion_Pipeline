@@ -1,0 +1,17 @@
+/.DS_Store
+/.env
+/__pycache__
+/ingestion_nodes1
+/jira_attachments
+/logs_confluence.md
+/manage.py
+/metadata_Berkshire.pdf.json
+/metadata_META.pdf.json
+/metadata_TEST-1_Jhonson and Jhonosn.pdf.json
+/metadata_TEST-2_NVIDIA.pdf.json
+/metadata_jp Morgan.pdf.json
+/metadata_nvidia.pdf.json
+/metadata_pdfsolutions.pdf.json
+/responses
+/serve.py
+/venv
