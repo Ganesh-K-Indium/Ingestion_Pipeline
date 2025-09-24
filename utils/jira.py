@@ -21,7 +21,7 @@ if not JIRA_URL or not EMAIL or not JIRA_API_TOKEN:
 def get_issues(project_key: str):
     """Fetch all issues from a Jira project using JQL."""
     jql = f"project={project_key}"
-    url = f"{JIRA_URL}/rest/api/3/search"
+    url = f"{JIRA_URL}/rest/api/3/search/jql"
     auth = HTTPBasicAuth(EMAIL, JIRA_API_TOKEN)
     headers = {"Accept": "application/json"}
 
