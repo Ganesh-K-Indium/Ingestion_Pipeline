@@ -7,14 +7,18 @@ from app_logger import log_stream
 
 
 
-app = FastAPI()
+app = FastAPI(
+    title="Ingestion MCP Server",
+    description="AI-powered document ingestion server with multiple source support",
+    version="1.0.0"
+)
 agent = ManagerAgent()
 
 from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # or restrict to ["http://localhost:3000"]
+    allow_origins=["*"],   # Allow all origins for external access
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,15 +45,15 @@ async def ingest(query: str):
     if source == "local_pdf" and parsed.get("file_name"):
         from ingestion_nodes import ingest_local_pdf
         stream = ingest_local_pdf(parsed["file_name"])
-    elif source == "confluence" and parsed.get("space_key"):
+    elif source == "confluence" or parsed.get("space_key"):
         from ingestion_nodes import ingest_confluence
-        stream = ingest_confluence(parsed["space_key"])
-    elif source == "jira" and parsed.get("project_key"):
+        stream = ingest_confluence('test')
+    elif source == "jira" or parsed.get("project_key"):
         from ingestion_nodes import ingest_jira 
-        stream = ingest_jira(parsed["project_key"])
-    elif source == "gdrive_folder" and parsed.get("folder_id"):
+        stream = ingest_jira('test')
+    elif source == "gdrive_folder" or parsed.get("folder_id"):
         from ingestion_nodes import ingest_gdrive_folder
-        stream = ingest_gdrive_folder(parsed["folder_id"])
+        stream = ingest_gdrive_folder('15uqZb5Ubzy7XV4iSw9EPlunnvXOGZnRn')
     elif source == "sharepoint" and parsed.get("file_url"):
         from ingestion_nodes import ingest_sharepoint
         stream = ingest_sharepoint(parsed["file_url"])
