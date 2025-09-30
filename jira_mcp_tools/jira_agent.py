@@ -4,12 +4,16 @@ Jira Agent - Intelligent LLM agent for Jira operations with tool selection and e
 
 import json
 import os
+import sys
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 import openai
 from dataclasses import asdict
 from pathlib import Path
 from dotenv import load_dotenv
+
+# Add parent directory to path for imports
+sys.path.append(str(Path(__file__).parent.parent))
 
 # Load environment variables from multiple possible locations
 def load_env_files():
@@ -109,6 +113,11 @@ class JiraAgent:
                 'description': 'Download attachments from issues or projects',
                 'parameters': ['project_key', 'issue_key', 'file_types', 'organize_by_type'],
                 'use_cases': ['download attachments', 'get files', 'download files', 'save attachments']
+            },
+            'download_and_ingest': {
+                'description': 'Download attachments and ingest them into vector database',
+                'parameters': ['project_key', 'issue_key', 'file_types', 'company_name', 'cleanup_after_ingest'],
+                'use_cases': ['download and ingest', 'ingest attachments', 'add to vector db', 'process attachments']
             }
         }
     
@@ -329,6 +338,15 @@ class JiraAgent:
             file_types = parameters.get('file_types')
             organize_by_type = parameters.get('organize_by_type', False)
             
+            # Normalize file_types parameter to handle both string and list inputs
+            if file_types:
+                if isinstance(file_types, str):
+                    # Convert string to list and normalize case
+                    file_types = [file_types.lower()]
+                elif isinstance(file_types, list):
+                    # Ensure all are lowercase
+                    file_types = [ft.lower() for ft in file_types]
+            
             # Convert project_key to uppercase if provided
             if project_key:
                 project_key = project_key.upper()
@@ -355,6 +373,39 @@ class JiraAgent:
                     'data': result,
                     'summary': f"Downloaded {result['total_files_downloaded']} files from {project_key}"
                 }
+            else:
+                return {'success': False, 'error': 'Either project_key or issue_key is required'}
+        
+        elif action == 'download_and_ingest':
+            project_key = parameters.get('project_key')
+            issue_key = parameters.get('issue_key')
+            file_types = parameters.get('file_types')
+            company_name = parameters.get('company_name')
+            cleanup_after_ingest = parameters.get('cleanup_after_ingest', True)
+            
+            # Normalize file_types parameter to handle both string and list inputs
+            if file_types:
+                if isinstance(file_types, str):
+                    # Convert string to list and normalize case
+                    file_types = [file_types.lower()]
+                elif isinstance(file_types, list):
+                    # Ensure all are lowercase
+                    file_types = [ft.lower() for ft in file_types]
+            
+            # Convert project_key to uppercase if provided
+            if project_key:
+                project_key = project_key.upper()
+            
+            if issue_key:
+                # Download and ingest from specific issue
+                return self._download_and_ingest_issue_attachments(
+                    issue_key, file_types, company_name, cleanup_after_ingest
+                )
+            elif project_key:
+                # Download and ingest from project
+                return self._download_and_ingest_project_attachments(
+                    project_key, file_types, company_name, cleanup_after_ingest
+                )
             else:
                 return {'success': False, 'error': 'Either project_key or issue_key is required'}
         
@@ -565,3 +616,241 @@ class JiraAgent:
             print(f"❌ Error: {result.get('error', 'Unknown error occurred')}")
         
         print("-" * 60)
+    
+    def _download_and_ingest_issue_attachments(self, 
+                                             issue_key: str,
+                                             file_types: Optional[List[str]] = None,
+                                             company_name: Optional[str] = None,
+                                             cleanup_after_ingest: bool = True) -> Dict[str, Any]:
+        """
+        Download attachments from a specific issue and ingest them into vector database.
+        
+        Args:
+            issue_key: Jira issue key
+            file_types: List of file extensions to process
+            company_name: Company name for document metadata
+            cleanup_after_ingest: Whether to delete files after successful ingestion
+            
+        Returns:
+            Dict with success status and processing results
+        """
+        try:
+            # Step 1: Download attachments
+            download_result = self.attachment_manager.download_issue_attachments(
+                issue_key, file_types, create_issue_folder=True
+            )
+            
+            if not download_result['downloaded']:
+                return {
+                    'success': True,
+                    'action': 'download_and_ingest',
+                    'message': f"No files downloaded from issue {issue_key}",
+                    'download_result': download_result,
+                    'ingestion_result': None
+                }
+            
+            # Step 2: Process downloaded files
+            ingestion_result = self._process_issue_files(
+                issue_key, download_result, company_name, cleanup_after_ingest
+            )
+            
+            # Handle case where ingestion fails
+            if ingestion_result is None:
+                ingestion_result = {'processed': 0, 'failed': 1, 'error': 'Ingestion process failed'}
+            
+            return {
+                'success': True,
+                'action': 'download_and_ingest',
+                'download_result': download_result,
+                'ingestion_result': ingestion_result,
+                'summary': f"Downloaded {download_result['downloaded']} files and processed {ingestion_result.get('processed', 0) if ingestion_result else 0} files from {issue_key}"
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Failed to download and ingest from issue {issue_key}: {str(e)}"
+            }
+    
+    def _download_and_ingest_project_attachments(self, 
+                                               project_key: str,
+                                               file_types: Optional[List[str]] = None,
+                                               company_name: Optional[str] = None,
+                                               cleanup_after_ingest: bool = True) -> Dict[str, Any]:
+        """
+        Download attachments from all issues in a project and ingest them into vector database.
+        
+        Args:
+            project_key: Jira project key
+            file_types: List of file extensions to process
+            company_name: Company name for document metadata
+            cleanup_after_ingest: Whether to delete files after successful ingestion
+            
+        Returns:
+            Dict with success status and processing results
+        """
+        try:
+            # Step 1: Download attachments from project
+            download_result = self.attachment_manager.download_project_attachments(
+                project_key, file_types, organize_by_type=False
+            )
+            
+            if not download_result.get('total_files_downloaded', 0):
+                return {
+                    'success': True,
+                    'action': 'download_and_ingest',
+                    'message': f"No files downloaded from project {project_key}",
+                    'download_result': download_result,
+                    'ingestion_result': None
+                }
+            
+            # Step 2: Process downloaded files for each issue
+            all_ingestion_results = []
+            total_processed = 0
+            
+            for issue_data in download_result.get('issues', []):
+                if issue_data.get('downloaded', 0) > 0:
+                    issue_key = issue_data['issue_key']
+                    ingestion_result = self._process_issue_files(
+                        issue_key, issue_data, company_name, cleanup_after_ingest
+                    )
+                    all_ingestion_results.append({
+                        'issue_key': issue_key,
+                        'result': ingestion_result
+                    })
+                    total_processed += ingestion_result.get('processed', 0)
+            
+            return {
+                'success': True,
+                'action': 'download_and_ingest',
+                'download_result': download_result,
+                'ingestion_results': all_ingestion_results,
+                'summary': f"Downloaded {download_result.get('total_files_downloaded', 0)} files and processed {total_processed} files from project {project_key}"
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Failed to download and ingest from project {project_key}: {str(e)}"
+            }
+    
+    def _process_issue_files(self, issue_key: str, download_data: Dict, 
+                           company_name: Optional[str], cleanup_after_ingest: bool) -> Dict[str, Any]:
+        """
+        Process downloaded files for a specific issue using image data preparation.
+        
+        Args:
+            issue_key: Jira issue key
+            download_data: Download result data containing file information
+            company_name: Company name for document metadata
+            cleanup_after_ingest: Whether to delete files after ingestion
+            
+        Returns:
+            Dict with processing results
+        """
+        try:
+            # Import here to avoid circular imports
+            import sys
+            sys.path.append(str(Path(__file__).parent.parent))
+            from utils.pdf_processor1 import process_pdf_and_stream
+            
+            print(f"🔍 Starting ingestion process for issue {issue_key}")
+            
+            # Get the download directory
+            download_path = Path(download_data.get('download_path', ''))
+            print(f"🔍 Download path: {download_path}")
+            
+            if not download_path.exists():
+                print(f"❌ Download path does not exist")
+                return {'processed': 0, 'error': 'Download path not found'}
+            
+            # Process each downloaded file
+            processed_files = []
+            failed_files = []
+            
+            files_to_process = download_data.get('files', [])
+            print(f"🔍 Found {len(files_to_process)} files to process")
+            
+            for file_info in files_to_process:
+                # Use 'local_path' key from attachment manager
+                file_path = Path(file_info['local_path'])
+                
+                try:
+                    print(f"📄 Processing {file_path.name} using PDF processor...")
+                    
+                    # Check if it's a PDF file
+                    if not file_path.suffix.lower() == '.pdf':
+                        failed_files.append({
+                            'file': file_path.name,
+                            'error': 'Not a PDF file - only PDFs are supported for ingestion'
+                        })
+                        continue
+                    
+                    # Use the robust PDF processor
+                    processing_successful = False
+                    processing_messages = []
+                    
+                    for message in process_pdf_and_stream(str(file_path)):
+                        processing_messages.append(message)
+                        print(f"   {message}")
+                        
+                        # Check for success indicators
+                        if "Added" in message and "chunks" in message:
+                            processing_successful = True
+                        elif "already ingested" in message:
+                            processing_successful = True
+                        elif "Error" in message:
+                            processing_successful = False
+                            break
+                    
+                    if processing_successful:
+                        processed_files.append({
+                            'file': file_path.name,
+                            'size_mb': file_info.get('size_mb', 0),
+                            'status': 'processed',
+                            'messages': processing_messages[-3:]  # Keep last 3 messages
+                        })
+                        
+                        print(f"✅ Successfully ingested {file_path.name}")
+                        
+                        # Cleanup if requested
+                        if cleanup_after_ingest:
+                            file_path.unlink()
+                            print(f"🗑️  Deleted {file_path.name}")
+                    else:
+                        failed_files.append({
+                            'file': file_path.name,
+                            'error': 'PDF processing failed',
+                            'messages': processing_messages[-3:]  # Keep last 3 messages for debugging
+                        })
+                        
+                except Exception as e:
+                    failed_files.append({
+                        'file': file_path.name,
+                        'error': str(e)
+                    })
+                    print(f"❌ Failed to process {file_path.name}: {str(e)}")
+            
+            # Cleanup empty directory if all files were processed and cleaned up
+            if cleanup_after_ingest and processed_files and not failed_files:
+                try:
+                    download_path.rmdir()
+                    print(f"🗑️  Removed empty directory {download_path}")
+                except OSError:
+                    pass  # Directory not empty or other issue
+            
+            return {
+                'processed': len(processed_files),
+                'failed': len(failed_files),
+                'processed_files': processed_files,
+                'failed_files': failed_files
+            }
+            
+        except Exception as e:
+            print(f"❌ Exception in _process_issue_files: {str(e)}")
+            import traceback
+            print(f"Traceback: {traceback.format_exc()}")
+            return {
+                'processed': 0,
+                'error': f"Processing failed: {str(e)}"
+            }

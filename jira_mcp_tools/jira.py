@@ -68,6 +68,62 @@ def main():
                         print(f"\n📦 Downloaded {data.get('total_files_downloaded', 0)} files")
                         print(f"   Location: {data.get('download_path', '')}")
                 
+                elif action == 'download_and_ingest':
+                    download_result = data.get('download_result', {})
+                    ingestion_result = data.get('ingestion_result') or data.get('ingestion_results')
+                    
+                    print(f"\n🔄 Download and Ingest Results:")
+                    
+                    # Show download results
+                    if 'downloaded' in download_result:
+                        # Single issue download
+                        print(f"   📥 Downloaded: {download_result.get('downloaded', 0)} files from issue")
+                        print(f"   📍 Location: {download_result.get('download_path', '')}")
+                    else:
+                        # Project-wide download
+                        print(f"   📥 Downloaded: {download_result.get('total_files_downloaded', 0)} files from project")
+                    
+                    # Show ingestion results
+                    if ingestion_result:
+                        if isinstance(ingestion_result, list):
+                            # Multiple issues processed
+                            total_processed = sum(r['result'].get('processed', 0) for r in ingestion_result)
+                            total_failed = sum(r['result'].get('failed', 0) for r in ingestion_result)
+                            print(f"   � Processed: {total_processed} files")
+                            if total_failed > 0:
+                                print(f"   ❌ Failed: {total_failed} files")
+                        else:
+                            # Single issue processed
+                            print(f"   🔄 Processed: {ingestion_result.get('processed', 0)} files")
+                            if ingestion_result.get('failed', 0) > 0:
+                                print(f"   ❌ Failed: {ingestion_result.get('failed', 0)} files")
+                        print(f"   📊 Successfully ingested into vector database")
+                        
+                        # Show errors if any
+                        errors = data.get('errors', [])
+                        if errors:
+                            print(f"   ⚠️  Errors: {len(errors)}")
+                            for error in errors[:3]:  # Show first 3 errors
+                                print(f"      • {error}")
+                            if len(errors) > 3:
+                                print(f"      ... and {len(errors) - 3} more errors")
+                        
+                        # Show processing details for issue-level results
+                        if 'processed_files' in data:
+                            processed_files = data['processed_files']
+                            if processed_files:
+                                print(f"   📄 File Details:")
+                                for file_info in processed_files[:3]:
+                                    filename = file_info.get('filename', 'Unknown')
+                                    file_type = file_info.get('type', 'unknown')
+                                    if file_type == 'pdf':
+                                        images = file_info.get('images_extracted', 0)
+                                        docs = file_info.get('documents_created', 0)
+                                        print(f"      📎 {filename}: {images} images → {docs} documents")
+                                    else:
+                                        status = file_info.get('status', 'processed')
+                                        print(f"      📎 {filename}: {status}")
+                
                 elif action == 'list_attachments':
                     if isinstance(data, dict):
                         total = data.get('total_attachments', 0)
@@ -166,6 +222,22 @@ def main():
                         elif action == 'download_attachments' and data:
                             downloaded = data.get('downloaded', data.get('total_files_downloaded', 0))
                             print(f"   Downloaded {downloaded} files")
+                        elif action == 'download_and_ingest' and data:
+                            # Extract results from the new structure
+                            download_result = data.get('download_result', {})
+                            ingestion_result = data.get('ingestion_result') or data.get('ingestion_results')
+                            
+                            downloaded = download_result.get('downloaded', download_result.get('total_files_downloaded', 0))
+                            
+                            if ingestion_result:
+                                if isinstance(ingestion_result, list):
+                                    processed = sum(r.get('result', {}).get('processed', 0) for r in ingestion_result if r and r.get('result'))
+                                else:
+                                    processed = ingestion_result.get('processed', 0) if ingestion_result else 0
+                            else:
+                                processed = 0
+                            
+                            print(f"   Downloaded {downloaded} files, processed {processed} files")
                         
                     else:
                         print(f"❌ {result.get('error', 'Failed')}")
