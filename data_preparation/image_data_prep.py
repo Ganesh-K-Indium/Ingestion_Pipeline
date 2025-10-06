@@ -29,6 +29,14 @@ class ImageDescription:
         if not self.openai_client.api_key:
             raise ValueError("OpenAI API key not found in environment variables")
     
+    def calculate_image_content_hash(self, image_data: bytes) -> str:
+        """Calculate a deterministic hash of individual image content."""
+        try:
+            return hashlib.sha256(image_data).hexdigest()
+        except Exception as e:
+            print(f"Error calculating image content hash: {e}")
+            return ""
+    
     def get_pdf_data(self):
         """
         this method is used to get the fitz object (pdf_document) of the pdf.
@@ -174,9 +182,11 @@ class ImageDescription:
     
     def get_image_information(self):
         """
-        Simplified image extraction with clean context text for efficient RAG retrieval.
+        Simplified image extraction with clean context text and image hashing for efficient RAG retrieval.
+        Returns both image details and image hashes.
         """
         image_details = {}
+        image_hashes = {}  # Store image hashes during extraction
         output_path = os.path.splitext(self.pdf_path)[0]
         os.makedirs(output_path, exist_ok=True)
         
@@ -200,10 +210,31 @@ class ImageDescription:
                 print(f"Page {page_num + 1}: Found {len(images)} images")
                 
                 # Process each image on the page
-                for img_info in images:
+                for img_index, img_info in enumerate(images):
                     img_path, xref = self.save_images(img_info, page_num, pdf_document, output_path)
                     
                     if img_path and xref:
+                        # Calculate hash for this image during extraction
+                        try:
+                            # Get the image data for hashing
+                            base_image = pdf_document.extract_image(xref)
+                            if base_image:
+                                image_bytes = base_image["image"]
+                                img_hash = self.calculate_image_content_hash(image_bytes)
+                                
+                                # Store hash with unique identifier
+                                img_id = f"page{page_num + 1}_img{img_index}"
+                                image_hashes[img_id] = {
+                                    "hash": img_hash,
+                                    "page": page_num + 1,
+                                    "index": img_index,
+                                    "size": len(image_bytes),
+                                    "xref": xref,
+                                    "path": img_path
+                                }
+                        except Exception as e:
+                            print(f"Warning: Could not hash image {xref}: {e}")
+                        
                         # Get clean context text around the image
                         context_text = self.get_comprehensive_image_context(xref, page, text_blocks)
                         image_details[img_path] = context_text
@@ -213,11 +244,12 @@ class ImageDescription:
                         print(f"  -> Image {processed_images}: Context length {len(context_text)} chars")
                     
             print(f"Successfully processed {processed_images}/{total_images} images")
-            return image_details
+            print(f"Generated {len(image_hashes)} image hashes")
+            return image_details, image_hashes  # Return both details and hashes
             
         except Exception as e:
             print(f"Error during image extraction: {e}")
-            return image_details
+            return image_details, image_hashes
         finally:
             pdf_document.close()
     
@@ -400,12 +432,32 @@ class ImageDescription:
                 "caption": caption
             }
 
-    def getRetriever(self,json_file_path, company):
+    def getRetriever(self, json_file_path, company, image_hashes=None):
+        """Enhanced retriever that includes image hashes in metadata."""
         with open(json_file_path, "r", encoding="utf-8") as file:
             image_descriptions = json.load(file)     
         image_docs = []
-        for image_path, caption in image_descriptions.items():
+        
+        for i, (image_path, caption) in enumerate(image_descriptions.items()):
             image_metadata = self.get_image_data(image_path, caption, company)
+            
+            # Add image content hash if available
+            if image_hashes:
+                # Try to find matching hash by path or index
+                img_hash = ""
+                for img_id, hash_info in image_hashes.items():
+                    if hash_info.get("path") == image_path:
+                        img_hash = hash_info["hash"]
+                        break
+                
+                # Fallback: use index-based matching
+                if not img_hash and i < len(image_hashes):
+                    hash_values = list(image_hashes.values())
+                    if i < len(hash_values):
+                        img_hash = hash_values[i]["hash"]
+                
+                image_metadata["image_content_hash"] = img_hash
+            
             doc = Document(
                 page_content=f"This is an image with the caption: {caption}",
                 metadata=image_metadata
