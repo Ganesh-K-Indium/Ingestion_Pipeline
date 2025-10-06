@@ -33,43 +33,20 @@ async def wait_for_server(url: str, timeout: int = 10):
 
 
 async def main():
-    # ------------------------------------------------------------
-    # 1️⃣ Model
-    # ------------------------------------------------------------
     model = ChatOpenAI(model="gpt-4.1", temperature=0)
-
-    # ------------------------------------------------------------
-    # 2️⃣ Streamable HTTP URL — must end with `/stream`
-    # ------------------------------------------------------------
     MCP_HTTP_STREAM_URL = "http://localhost:8000/mcp"
-    #await wait_for_server("http://localhost:8000")
 
-    # ------------------------------------------------------------
-    # 3️⃣ Connect to MCP stream endpoint (triple unpack)
-    # ------------------------------------------------------------
     async with streamablehttp_client(MCP_HTTP_STREAM_URL) as (read_stream, write_stream, _):
         async with ClientSession(read_stream, write_stream) as session:
             await session.initialize()
             print("✅ MCP Client Session initialized")
-
-            # --------------------------------------------------------
-            # 4️⃣ Load MCP tools dynamically
-            # --------------------------------------------------------
             tools = await load_mcp_tools(session)
             print(f"✅ Loaded {len(tools)} Jira MCP tools via HTTP stream")
-
-            # --------------------------------------------------------
-            # 5️⃣ Create LangGraph ReAct Agent
-            # --------------------------------------------------------
             agent = create_react_agent(
                 model=model,
                 tools=tools,
                 name="JiraLangGraphAgent"
             )
-
-            # --------------------------------------------------------
-            # 6️⃣ Run a test query
-            # --------------------------------------------------------
             user_prompt = "download and ingest attachments for issue test-1"
             print(f"\n🧠 Running agent with prompt:\n{user_prompt}\n")
 
